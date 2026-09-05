@@ -340,12 +340,36 @@ export abstract class BaseFalkorDBBackend implements GraphBackend {
     try {
       const conditions: string[] = [];
       const parameters: Record<string, unknown> = {};
+      let hasTokens = false;
 
       if (searchQuery.query) {
-        conditions.push(
-          "(m.title CONTAINS $query OR m.content CONTAINS $query OR m.summary CONTAINS $query)"
-        );
-        parameters["query"] = searchQuery.query;
+        const cleanQuery = searchQuery.query.replace(/[\u2010-\u2015]/g, "-").trim();
+        const queryLower = cleanQuery.toLowerCase();
+        parameters["queryLower"] = queryLower;
+
+        const STOPWORDS = new Set([
+          "a", "an", "the", "in", "on", "at", "of", "to", "for", "with",
+          "is", "are", "that", "where", "and", "or", "from", "by", "each", "other",
+          "into", "over", "without"
+        ]);
+
+        const tokens = cleanQuery
+          .toLowerCase()
+          .replace(/[^\w\s-]/g, " ")
+          .split(/\s+/)
+          .filter((t) => t.length > 2 && !STOPWORDS.has(t));
+
+        if (tokens.length > 0) {
+          parameters["terms"] = tokens;
+          hasTokens = true;
+          conditions.push(
+            "(toLower(m.title) CONTAINS $queryLower OR toLower(m.content) CONTAINS $queryLower OR toLower(m.summary) CONTAINS $queryLower OR ANY(t IN $terms WHERE toLower(m.title) CONTAINS t OR toLower(m.content) CONTAINS t OR toLower(m.summary) CONTAINS t))"
+          );
+        } else {
+          conditions.push(
+            "(toLower(m.title) CONTAINS $queryLower OR toLower(m.content) CONTAINS $queryLower OR toLower(m.summary) CONTAINS $queryLower)"
+          );
+        }
       }
 
       if (searchQuery.memory_types.length > 0) {
@@ -394,14 +418,29 @@ export abstract class BaseFalkorDBBackend implements GraphBackend {
 
       const whereClause = conditions.length > 0 ? conditions.join(" AND ") : "true";
 
-      const query = `
-        MATCH (m:Memory)
-        WHERE ${whereClause}
-        RETURN m
-        ORDER BY m.importance DESC, m.created_at DESC
-        SKIP $offset
-        LIMIT $limit
-      `;
+      const query = hasTokens
+        ? `
+          MATCH (m:Memory)
+          WHERE ${whereClause}
+          WITH m, (
+            (CASE WHEN toLower(m.title) CONTAINS $queryLower THEN 25 ELSE 0 END) +
+            (CASE WHEN toLower(m.content) CONTAINS $queryLower THEN 10 ELSE 0 END) +
+            (size([t IN $terms WHERE toLower(m.title) CONTAINS t]) * 5) +
+            (size([t IN $terms WHERE toLower(m.content) CONTAINS t]) * 1)
+          ) AS relevance
+          RETURN m
+          ORDER BY relevance DESC, m.importance DESC, m.created_at DESC
+          SKIP $offset
+          LIMIT $limit
+        `
+        : `
+          MATCH (m:Memory)
+          WHERE ${whereClause}
+          RETURN m
+          ORDER BY m.importance DESC, m.created_at DESC
+          SKIP $offset
+          LIMIT $limit
+        `;
       parameters["limit"] = searchQuery.limit;
       parameters["offset"] = searchQuery.offset ?? 0;
 
