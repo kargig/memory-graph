@@ -280,6 +280,20 @@ export abstract class BaseFalkorDBBackend implements GraphBackend {
       }
     }
 
+    // Initialize RediSearch native fulltext index on Memory nodes (title, content, summary)
+    try {
+      await this.executeQuery(
+        "CALL db.idx.fulltext.createNodeIndex('Memory', 'title', 'content', 'summary')",
+        {},
+        true
+      );
+    } catch (err) {
+      const msg = String(err);
+      if (!/already indexed|already exists/i.test(msg)) {
+        console.warn(`Note: RediSearch fulltext index init: ${err}`);
+      }
+    }
+
     console.log("Schema initialization completed");
   }
 
@@ -338,6 +352,75 @@ export abstract class BaseFalkorDBBackend implements GraphBackend {
 
   async searchMemories(searchQuery: SearchQuery): Promise<Memory[]> {
     try {
+      // 1. First attempt: Native RediSearch fulltext query (sub-5ms BM25 ranking)
+      if (searchQuery.query) {
+        const cleanQuery = searchQuery.query.replace(/[\u2010-\u2015]/g, "-").trim();
+        const STOPWORDS = new Set([
+          "a", "an", "the", "in", "on", "at", "of", "to", "for", "with",
+          "is", "are", "that", "where", "and", "or", "from", "by", "each", "other",
+          "into", "over", "without"
+        ]);
+
+        const tokens = cleanQuery
+          .replace(/[^\w\s]/g, " ")
+          .split(/\s+/)
+          .filter((t) => t.length > 2 && !STOPWORDS.has(t.toLowerCase()));
+
+        if (tokens.length > 0) {
+          const rsSearchStr = tokens.join(" | ");
+          const rsFilters: string[] = [];
+          const rsParams: Record<string, unknown> = {};
+
+          if (searchQuery.memory_types.length > 0) {
+            rsFilters.push("node.type IN $memory_types");
+            rsParams["memory_types"] = searchQuery.memory_types;
+          }
+          if (searchQuery.tags.length > 0) {
+            rsFilters.push("ANY(tag IN $tags WHERE tag IN node.tags)");
+            rsParams["tags"] = searchQuery.tags;
+          }
+          if (searchQuery.project_path) {
+            rsFilters.push("node.context_project_path = $project_path");
+            rsParams["project_path"] = searchQuery.project_path;
+          }
+          if (searchQuery.min_importance !== undefined && searchQuery.min_importance !== null) {
+            rsFilters.push("node.importance >= $min_importance");
+            rsParams["min_importance"] = searchQuery.min_importance;
+          }
+          if (searchQuery.min_confidence !== undefined && searchQuery.min_confidence !== null) {
+            rsFilters.push("node.confidence >= $min_confidence");
+            rsParams["min_confidence"] = searchQuery.min_confidence;
+          }
+
+          const rsWhere = rsFilters.length > 0 ? `WHERE ${rsFilters.join(" AND ")}` : "";
+          const rsQuery = `
+            CALL db.idx.fulltext.queryNodes('Memory', '${rsSearchStr.replace(/'/g, "\\'")}') YIELD node, score
+            ${rsWhere}
+            RETURN node AS m, score
+            ORDER BY score DESC, node.importance DESC, node.created_at DESC
+            SKIP ${searchQuery.offset ?? 0}
+            LIMIT ${searchQuery.limit}
+          `;
+
+          try {
+            const rsResult = await this.executeQuery(rsQuery, rsParams, false);
+            if (rsResult.length > 0) {
+              const memories: Memory[] = [];
+              for (const record of rsResult) {
+                const mem = parseMemoryFromProperties(record["m"] as Record<string, unknown>, this._display_name);
+                if (mem) memories.push(mem);
+              }
+              if (memories.length > 0) {
+                return memories;
+              }
+            }
+          } catch {
+            // benign fallback to Cypher token query
+          }
+        }
+      }
+
+      // 2. Fallback: In-database Cypher token relevance query
       const conditions: string[] = [];
       const parameters: Record<string, unknown> = {};
       let hasTokens = false;
