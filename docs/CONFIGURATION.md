@@ -161,6 +161,58 @@ Adds database statistics and complex relationship queries to the core tools.
 }
 ```
 
+### Elasticsearch / Elastic Cloud Backend
+
+MemoryGraph supports both **Elastic Cloud Serverless** (with automated vector search) and **local self-hosted Elasticsearch 9.x** (with high-speed BM25 search).
+
+#### Elastic Cloud Configuration (Vector + BM25 Hybrid)
+
+```json
+{
+  "mcpServers": {
+    "memorygraph": {
+      "command": "memorygraph",
+      "args": ["--backend", "elasticsearch", "--profile", "extended"],
+      "env": {
+        "MEMORY_BACKEND": "elasticsearch",
+        "MEMORY_ELASTICSEARCH_URL": "https://<project-id>.es.<region>.aws.elastic.cloud:443",
+        "MEMORY_ELASTICSEARCH_API_KEY": "your-api-key",
+        "MEMORY_ELASTICSEARCH_INDEX_PREFIX": "memorygraph",
+        "MEMORY_ELASTICSEARCH_SEMANTIC_SEARCH": "true",
+        "MEMORY_TOOL_PROFILE": "extended"
+      }
+    }
+  }
+}
+```
+
+#### Local Elasticsearch Configuration (Docker / Self-Hosted BM25)
+
+For a local container running at `http://localhost:9200` without cloud inference models, semantic search is automatically disabled to prevent model download delays:
+
+```json
+{
+  "mcpServers": {
+    "memorygraph": {
+      "command": "memorygraph",
+      "args": ["--backend", "elasticsearch", "--profile", "extended"],
+      "env": {
+        "MEMORY_BACKEND": "elasticsearch",
+        "MEMORY_ELASTICSEARCH_URL": "http://localhost:9200",
+        "MEMORY_ELASTICSEARCH_SEMANTIC_SEARCH": "false"
+      }
+    }
+  }
+}
+```
+
+#### Elasticsearch Tuning & Design Rationale
+
+- **Multi-Field Mapping**: `content` and `summary` are indexed as both `text` (for full Lucene 10 BM25 tokenization and stemming) and `semantic_text` subfields (`content.semantic`). This ensures exact technical code tokens are never lost when vector search is active.
+- **Score Normalization (`boost: 10.0`)**: Vector cosine similarity (0.0 to 1.0) is boosted by 10x to balance against raw unbounded BM25 scores (typically 5.0 to 25.0).
+- **Quorum Filtering (`minimum_should_match: "2<75%"`)**: Multi-word queries require multiple term matches to prevent single ubiquitous technical words from causing false-positive hits.
+- **Auto-Detection**: `MEMORY_ELASTICSEARCH_SEMANTIC_SEARCH` automatically defaults to `true` for `*.elastic.cloud` URLs and `false` for local URLs unless explicitly overridden.
+
 ### Docker-based Configuration
 
 ```json
@@ -272,6 +324,11 @@ export MEMORY_NEO4J_PASSWORD=your-password
 export MEMORY_MEMGRAPH_URI=bolt://localhost:7687
 export MEMORY_MEMGRAPH_USER=memgraph
 export MEMORY_MEMGRAPH_PASSWORD=memgraph
+
+# Elasticsearch / Elastic Cloud configuration (v0.14.0+)
+export MEMORY_ELASTICSEARCH_URL=https://<project-id>.es.<region>.aws.elastic.cloud:443
+export MEMORY_ELASTICSEARCH_API_KEY=your-api-key
+export MEMORY_ELASTICSEARCH_INDEX_PREFIX=memorygraph
 
 # Relationship configuration (v0.9.0+)
 export MEMORY_ALLOW_CYCLES=false      # true | false (default) - Allow circular relationships

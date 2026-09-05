@@ -17,3 +17,4 @@ export {
   CircuitBreakerOpenError,
 } from "./cloud.ts";
 export { SQLiteBackend } from "./sqlite.ts";
+export { ElasticsearchBackend } from "./elasticsearch.ts";

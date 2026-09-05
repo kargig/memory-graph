@@ -76,4 +76,25 @@ describe("Config", () => {
     expect(summary).toHaveProperty("cloud");
     expect(summary).toHaveProperty("falkordblite");
   });
+
+  test("elasticsearch config defaults and overrides", () => {
+    delete process.env["MEMORY_ELASTICSEARCH_URL"];
+    delete process.env["MEMORY_ELASTICSEARCH_API_KEY"];
+    delete process.env["MEMORY_ELASTICSEARCH_INDEX_PREFIX"];
+
+    expect(Config.ELASTICSEARCH_URL).toBe("http://localhost:9200");
+    expect(Config.ELASTICSEARCH_INDEX_PREFIX).toBe("memorygraph");
+    expect(Config.ELASTICSEARCH_API_KEY).toBeUndefined();
+
+    process.env["MEMORY_ELASTICSEARCH_URL"] = "https://my-es-cluster.es.cloud:443";
+    process.env["MEMORY_ELASTICSEARCH_API_KEY"] = "test-key-123";
+    process.env["MEMORY_ELASTICSEARCH_INDEX_PREFIX"] = "custom_prefix";
+
+    expect(Config.ELASTICSEARCH_URL).toBe("https://my-es-cluster.es.cloud:443");
+    expect(Config.ELASTICSEARCH_API_KEY).toBe("test-key-123");
+    expect(Config.ELASTICSEARCH_INDEX_PREFIX).toBe("custom_prefix");
+
+    process.env["MEMORY_BACKEND"] = "elasticsearch";
+    expect(Config.getBackendType()).toBe("elasticsearch");
+  });
 });

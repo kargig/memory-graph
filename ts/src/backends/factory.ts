@@ -11,7 +11,7 @@ import type { GraphBackend, HealthCheckResult } from "./index.ts";
 import type { Memory, Relationship, RelationshipProperties, SearchQuery } from "../models.ts";
 
 const VALID_BACKENDS =
-  "neo4j, memgraph, falkordb, falkordblite, sqlite, turso, ladybugdb, cloud, auto";
+  "neo4j, memgraph, falkordb, falkordblite, sqlite, turso, ladybugdb, elasticsearch, cloud, auto";
 
 const BACKEND_NAMES: Record<string, string> = {
   neo4j: "Neo4j",
@@ -22,6 +22,7 @@ const BACKEND_NAMES: Record<string, string> = {
   turso: "Turso",
   cloud: "Cloud (MemoryGraph Cloud)",
   ladybugdb: "LadybugDB",
+  elasticsearch: "Elasticsearch",
 };
 
 export class BackendFactory {
@@ -72,6 +73,8 @@ export class BackendFactory {
         return BackendFactory.createTurso();
       case "ladybugdb":
         return BackendFactory.createLadybugDB();
+      case "elasticsearch":
+        return BackendFactory.createElasticsearch();
       default:
         throw new DatabaseConnectionError(
           `Unknown backend type: ${backendType}. Valid options: ${VALID_BACKENDS}`
@@ -119,6 +122,14 @@ export class BackendFactory {
     const { SQLiteBackend } = await import("./sqlite.ts");
     const path = dbPath ?? Config.SQLITE_PATH;
     const backend = new SQLiteBackend(path);
+    await backend.connect();
+    await backend.initializeSchema();
+    return backend;
+  }
+
+  static async createElasticsearch(): Promise<GraphBackend> {
+    const { ElasticsearchBackend } = await import("./elasticsearch.ts");
+    const backend = new ElasticsearchBackend();
     await backend.connect();
     await backend.initializeSchema();
     return backend;

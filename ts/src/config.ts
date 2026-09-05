@@ -47,6 +47,7 @@ export type BackendType =
   | "falkordb"
   | "falkordblite"
   | "ladybugdb"
+  | "elasticsearch"
   | "auto";
 
 export const ALL_BACKEND_TYPES: BackendType[] = [
@@ -58,6 +59,7 @@ export const ALL_BACKEND_TYPES: BackendType[] = [
   "falkordb",
   "falkordblite",
   "ladybugdb",
+  "elasticsearch",
   "auto",
 ];
 
@@ -240,6 +242,37 @@ export class Config {
     );
   }
 
+  // Elasticsearch
+  static get ELASTICSEARCH_URL(): string {
+    return envStr(["MEMORY_ELASTICSEARCH_URL", "ELASTICSEARCH_URL"], "http://localhost:9200");
+  }
+  static get ELASTICSEARCH_API_KEY(): string | undefined {
+    return env(["MEMORY_ELASTICSEARCH_API_KEY", "ELASTICSEARCH_API_KEY"]);
+  }
+  static get ELASTICSEARCH_USERNAME(): string | undefined {
+    return env(["MEMORY_ELASTICSEARCH_USERNAME", "ELASTICSEARCH_USERNAME"]);
+  }
+  static get ELASTICSEARCH_PASSWORD(): string | undefined {
+    return env(["MEMORY_ELASTICSEARCH_PASSWORD", "ELASTICSEARCH_PASSWORD"]);
+  }
+  static get ELASTICSEARCH_INDEX_PREFIX(): string {
+    return envStr(["MEMORY_ELASTICSEARCH_INDEX_PREFIX", "ELASTICSEARCH_INDEX_PREFIX"], "memorygraph");
+  }
+  static get ELASTICSEARCH_EMBEDDING_PIPELINE(): string | undefined {
+    return env(["MEMORY_ELASTICSEARCH_EMBEDDING_PIPELINE", "ELASTICSEARCH_EMBEDDING_PIPELINE"]);
+  }
+  static get ELASTICSEARCH_TIMEOUT(): number {
+    return envInt(["MEMORY_ELASTICSEARCH_TIMEOUT", "ELASTICSEARCH_TIMEOUT"], 30000);
+  }
+  static get ELASTICSEARCH_SEMANTIC_SEARCH(): boolean {
+    const raw = env(["MEMORY_ELASTICSEARCH_SEMANTIC_SEARCH", "ELASTICSEARCH_SEMANTIC_SEARCH"]);
+    if (raw !== undefined) {
+      return raw.toLowerCase() === "true";
+    }
+    // Default to true for Elastic Cloud (where inference service is managed), false for local/self-hosted
+    return Config.ELASTICSEARCH_URL.includes(".elastic.cloud");
+  }
+
   // Tool profile
   static get TOOL_PROFILE(): string {
     return envStr(["MEMORY_TOOL_PROFILE"], "core");
@@ -376,6 +409,11 @@ export class Config {
         password_configured: !!Config.FALKORDB_PASSWORD,
       },
       falkordblite: { path: Config.FALKORDBLITE_PATH },
+      elasticsearch: {
+        url: Config.ELASTICSEARCH_URL,
+        api_key_configured: !!Config.ELASTICSEARCH_API_KEY,
+        index_prefix: Config.ELASTICSEARCH_INDEX_PREFIX,
+      },
       logging: { level: Config.LOG_LEVEL },
       features: {
         auto_extract_entities: Config.AUTO_EXTRACT_ENTITIES,
